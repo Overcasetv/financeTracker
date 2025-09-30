@@ -8,9 +8,17 @@ GUI Interface (Tkinter): A clean, modern, and responsive graphical user interfac
 
 Persistent Data Storage (SQLite): All transaction data is securely stored locally in a finance_data.db file, ensuring data persists between sessions.
 
+Financial Summary & Statistics (NEW!):
+
+Key Metrics: Real-time display of Net Worth (Total Income - Total Expenses), Total Income, and Total Expenses.
+
+Data Filtering (NEW!):
+
+Filter Controls: Easily filter the displayed transactions and charts by Date Range (YYYY-MM-DD) and Transaction Type (Income/Expense/All).
+
 Real-Time Visualization (Matplotlib/Pandas):
 
-Cumulative Balance Chart: Track your running balance trend over time.
+Cumulative Balance Chart: Track your running balance trend over time, adjusted by active filters.
 
 Category Summary: Bar charts showing a breakdown of top income and expense categories.
 
