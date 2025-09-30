@@ -6,7 +6,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
-from matplotlib.figure import Figure # <-- FIX: Import Figure explicitly
+from matplotlib.figure import Figure
 
 # --- 1. Database Management ---
 
@@ -48,10 +48,36 @@ class DatabaseManager:
             messagebox.showerror("DB Error", f"Could not add transaction: {e}")
             return False
 
-    def get_all_transactions(self):
-        """Retrieves all transactions, ordered by date."""
-        self.cursor.execute("SELECT id, date, type, category, amount, description FROM transactions ORDER BY date, id")
-        return self.cursor.fetchall()
+    def get_all_transactions(self, start_date=None, end_date=None, trans_type=None, category=None):
+        """
+        Retrieves all or filtered transactions, ordered by date.
+        This single method now handles all filtering logic.
+        """
+        query = "SELECT id, date, type, category, amount, description FROM transactions WHERE 1=1"
+        params = []
+        
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+        if trans_type and trans_type != 'All':
+            query += " AND type = ?"
+            params.append(trans_type)
+        if category and category != 'All':
+            query += " AND category = ?"
+            params.append(category)
+
+        query += " ORDER BY date, id"
+        
+        try:
+            self.cursor.execute(query, tuple(params))
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            messagebox.showerror("DB Error", f"Could not retrieve transactions: {e}")
+            return []
+
 
     def delete_transaction(self, transaction_id):
         """Deletes a specific transaction by ID."""
@@ -73,12 +99,22 @@ class FinanceApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Professional Personal Finance Manager")
+        
+        try:
+            self.tk.call('::tk::mac::setAppName', 'Finance Manager')
+        except:
+            pass
+            
         self.geometry("1200x800")
         self.db = DatabaseManager()
 
-        # Define default categories
         self.income_categories = ['Salary', 'Freelance', 'Investment', 'Other Income']
         self.expense_categories = ['Rent', 'Groceries', 'Utilities', 'Transportation', 'Entertainment', 'Savings', 'Other Expense']
+        
+        # Filter variables
+        self.filter_start_date = tk.StringVar(value="")
+        self.filter_end_date = tk.StringVar(value="")
+        self.filter_type = tk.StringVar(value="All")
 
         # Configure the main grid layout
         self.grid_rowconfigure(0, weight=1)
@@ -99,7 +135,7 @@ class FinanceApp(tk.Tk):
 
         # Initialize UI Components
         self._create_input_panel()
-        self._create_visualization_panel()
+        self._create_visualization_panel() # This now calls summary and filter setup
         self._create_transaction_table()
         
         # Load data on startup
@@ -108,6 +144,7 @@ class FinanceApp(tk.Tk):
 
     def _create_input_panel(self):
         """Creates the frame for adding new transactions."""
+        # ... (Input panel creation logic remains the same)
         input_frame = ttk.Frame(self, padding="20", style='Accent.TFrame')
         input_frame.grid(row=0, column=0, sticky="nsew")
         input_frame.grid_rowconfigure(9, weight=1)
@@ -167,26 +204,76 @@ class FinanceApp(tk.Tk):
             categories = self.expense_categories
         
         self.fields['category_menu']['values'] = categories
-        self.fields['category_var'].set(categories[0]) # Set default to the first item
+        if categories:
+            self.fields['category_var'].set(categories[0]) # Set default to the first item
 
     def _create_visualization_panel(self):
         """Creates the frame for the transaction table and charts."""
-        viz_frame = ttk.Frame(self, padding="20")
+        viz_frame = ttk.Frame(self, padding="10")
         viz_frame.grid(row=0, column=1, sticky="nsew")
-        viz_frame.grid_rowconfigure(0, weight=1) # Chart frame
-        viz_frame.grid_rowconfigure(1, weight=1) # Table frame
         viz_frame.grid_columnconfigure(0, weight=1)
 
-        # 2a. Chart Display Frame
-        self.chart_frame = ttk.Frame(viz_frame, padding="10")
+        # Row 0: Charts
+        self.chart_frame = ttk.Frame(viz_frame, padding="10", height=300)
         self.chart_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        self.chart_frame.grid_columnconfigure(0, weight=1)
+        self.chart_frame.grid_rowconfigure(0, weight=1)
+        
+        # Row 1: Summary Statistics
+        self._create_summary_panel(viz_frame, row=1)
 
-        # 2b. Transaction Table (Will be placed below the chart)
+        # Row 2: Filters
+        self._create_filter_controls(viz_frame, row=2)
+        
+        # Row 3: Transaction Table
         self.table_frame = ttk.Frame(viz_frame, padding="10")
-        self.table_frame.grid(row=1, column=0, sticky="nsew")
+        self.table_frame.grid(row=3, column=0, sticky="nsew")
+        viz_frame.grid_rowconfigure(3, weight=1) # Give table most vertical space
+
+    def _create_summary_panel(self, master, row):
+        """Creates a panel to display summary statistics."""
+        summary_frame = ttk.Frame(master, padding="10", style='Accent.TFrame')
+        summary_frame.grid(row=row, column=0, sticky="ew", pady=5)
+        
+        self.summary_labels = {}
+        metrics = [("Net Worth", '#007aff'), ("Total Income", '#4CAF50'), ("Total Expenses", '#FF6347')]
+        
+        for i, (text, color) in enumerate(metrics):
+            label = ttk.Label(summary_frame, text=f"{text}: $0.00", foreground=color, font=('Inter', 11, 'bold'))
+            label.grid(row=0, column=i, padx=20, pady=5)
+            self.summary_labels[text] = label
+        
+        # Calculate summary initially
+        self.calculate_summary_stats()
+
+    def _create_filter_controls(self, master, row):
+        """Creates date and type filter controls."""
+        filter_frame = ttk.Frame(master, padding="10")
+        filter_frame.grid(row=row, column=0, sticky="ew", pady=5)
+        
+        ttk.Label(filter_frame, text="Filter:").pack(side=tk.LEFT, padx=(0, 10))
+
+        # Date Range Filter
+        ttk.Label(filter_frame, text="Start Date:").pack(side=tk.LEFT, padx=(10, 5))
+        ttk.Entry(filter_frame, textvariable=self.filter_start_date, width=15).pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(filter_frame, text="End Date:").pack(side=tk.LEFT, padx=(10, 5))
+        ttk.Entry(filter_frame, textvariable=self.filter_end_date, width=15).pack(side=tk.LEFT, padx=5)
+        
+        # Type Filter
+        ttk.Label(filter_frame, text="Type:").pack(side=tk.LEFT, padx=(10, 5))
+        type_options = ['All', 'Income', 'Expense']
+        ttk.Combobox(filter_frame, textvariable=self.filter_type, values=type_options, state="readonly", width=10).pack(side=tk.LEFT, padx=5)
+        
+        # Apply Button
+        ttk.Button(filter_frame, text="Apply Filters", command=self.apply_filters).pack(side=tk.LEFT, padx=15)
+        
+        # Reset Button
+        ttk.Button(filter_frame, text="Reset", command=self.reset_filters).pack(side=tk.LEFT)
 
     def _create_transaction_table(self):
         """Sets up the Treeview for displaying transactions."""
+        # ... (Table creation logic remains the same)
         table_columns = ('id', 'date', 'type', 'category', 'amount', 'description')
         self.tree = ttk.Treeview(self.table_frame, columns=table_columns, show='headings', selectmode='browse')
 
@@ -215,32 +302,58 @@ class FinanceApp(tk.Tk):
         # Delete Button for selected item
         ttk.Button(self.table_frame, text="Delete Selected", command=self.delete_selected_transaction).pack(pady=10)
 
-    # --- 3. Data Handling Logic ---
+    # --- 3. Data Handling Logic (Enhanced) ---
+
+    def apply_filters(self):
+        """Applies the current filter settings and reloads data/plots."""
+        self.load_transactions()
+        self.update_plots()
+        self.calculate_summary_stats()
+
+    def reset_filters(self):
+        """Clears all filters and reloads data/plots."""
+        self.filter_start_date.set("")
+        self.filter_end_date.set("")
+        self.filter_type.set("All")
+        self.load_transactions()
+        self.update_plots()
+        self.calculate_summary_stats()
+
 
     def load_transactions(self):
-        """Fetches transactions from DB and populates the Treeview."""
+        """Fetches transactions from DB using current filters and populates the Treeview."""
+        # Get filter values
+        start_date = self.filter_start_date.get()
+        end_date = self.filter_end_date.get()
+        trans_type = self.filter_type.get()
+        
+        # Basic date format validation
+        try:
+            if start_date: datetime.strptime(start_date, "%Y-%m-%d")
+            if end_date: datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showerror("Filter Error", "Invalid date format in filters. Use YYYY-MM-DD.")
+            return
+
         # Clear existing data
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        transactions = self.db.get_all_transactions()
+        transactions = self.db.get_all_transactions(start_date=start_date, end_date=end_date, trans_type=trans_type)
 
         # Insert new data
         for row in transactions:
             transaction_id, date, type, category, amount, description = row
-            # Format amount nicely
             formatted_amount = f"${amount:,.2f}"
             
-            # Apply color tag for visual distinction
             tag = 'income' if type == 'Income' else 'expense'
-            
-            # Configure tags (requires mapping the tag name to style)
-            self.tree.tag_configure('income', background='#e6ffe6', foreground='#006600') # Light green for income
-            self.tree.tag_configure('expense', background='#ffe6e6', foreground='#cc0000') # Light red for expense
+            self.tree.tag_configure('income', background='#e6ffe6', foreground='#006600')
+            self.tree.tag_configure('expense', background='#ffe6e6', foreground='#cc0000')
 
             self.tree.insert('', tk.END, values=(transaction_id, date, type, category, formatted_amount, description), tags=(tag,))
         
-        self.update_plots()
+        # Note: update_plots and calculate_summary_stats are now called separately via apply_filters/reset_filters
+        # and on startup.
 
     def add_transaction_handler(self):
         """Validates and adds a new transaction."""
@@ -261,6 +374,8 @@ class FinanceApp(tk.Tk):
             if self.db.add_transaction(date_str, transaction_type, category, amount, description):
                 messagebox.showinfo("Success", "Transaction added successfully.")
                 self.load_transactions()
+                self.update_plots()
+                self.calculate_summary_stats()
                 # Clear inputs after success (except date)
                 self.fields['amount'].delete(0, tk.END)
                 self.fields['description'].delete(0, tk.END)
@@ -277,23 +392,54 @@ class FinanceApp(tk.Tk):
             messagebox.showwarning("Selection Error", "Please select a transaction to delete.")
             return
         
-        # Get the first item's values (assuming single selection)
         values = self.tree.item(selected_item[0], 'values')
         transaction_id = values[0]
 
-        # Use a custom 'dialog' instead of the blocked tk.confirm
         if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to delete Transaction ID: {transaction_id}?"):
             if self.db.delete_transaction(transaction_id):
                 messagebox.showinfo("Success", "Transaction deleted.")
                 self.load_transactions()
+                self.update_plots()
+                self.calculate_summary_stats()
             else:
                 messagebox.showerror("Error", "Failed to delete transaction.")
 
-    # --- 4. Visualization (Matplotlib) ---
+    # --- 4. Summary & Visualization ---
     
-    def _prepare_data_for_plots(self):
-        """Fetches transactions and prepares a pandas DataFrame for plotting."""
-        transactions = self.db.get_all_transactions()
+    def calculate_summary_stats(self):
+        """Calculates and updates Net Worth, Total Income, and Total Expenses."""
+        df = self._prepare_data_for_plots(for_plots=False) # Get all data, not just filtered
+        
+        if df.empty:
+            total_income = 0
+            total_expense = 0
+        else:
+            total_income = df[df['type'] == 'Income']['amount'].sum()
+            total_expense = df[df['type'] == 'Expense']['amount'].sum()
+
+        net_worth = total_income - total_expense
+        
+        # Update labels
+        self.summary_labels["Net Worth"].config(text=f"Net Worth: ${net_worth:,.2f}")
+        self.summary_labels["Total Income"].config(text=f"Total Income: ${total_income:,.2f}")
+        self.summary_labels["Total Expenses"].config(text=f"Total Expenses: ${total_expense:,.2f}")
+
+
+    def _prepare_data_for_plots(self, for_plots=True):
+        """
+        Fetches transactions and prepares a pandas DataFrame for plotting. 
+        If for_plots is True, it applies the current filters.
+        """
+        if for_plots:
+            start_date = self.filter_start_date.get()
+            end_date = self.filter_end_date.get()
+            trans_type = self.filter_type.get()
+        else:
+            # When calculating overall summary, we want ALL data
+            start_date, end_date, trans_type = None, None, 'All'
+            
+        transactions = self.db.get_all_transactions(start_date=start_date, end_date=end_date, trans_type=trans_type)
+
         if not transactions:
             return pd.DataFrame()
 
@@ -315,15 +461,15 @@ class FinanceApp(tk.Tk):
         return df
 
     def update_plots(self):
-        """Generates and displays the Running Balance and Category Summary charts."""
-        df = self._prepare_data_for_plots()
+        """Generates and displays the Running Balance and Category Summary charts based on filters."""
+        df = self._prepare_data_for_plots(for_plots=True)
 
         # Clear existing charts
         for widget in self.chart_frame.winfo_children():
             widget.destroy()
 
         if df.empty:
-            ttk.Label(self.chart_frame, text="No transactions recorded yet. Add some data to see the charts!", 
+            ttk.Label(self.chart_frame, text="No transactions available for the selected filters.", 
                       font=('Inter', 12), foreground='gray').pack(expand=True)
             return
 
@@ -338,55 +484,46 @@ class FinanceApp(tk.Tk):
         fig = Figure(figsize=(5, 3.5), dpi=100)
         ax = fig.add_subplot(111)
 
-        # Plot the cumulative balance
         ax.plot(df['date'], df['running_balance'], 
                 color='#007aff', linewidth=2, marker='o', markersize=4, linestyle='-')
         
         # Styling
-        ax.set_title('Cumulative Balance Over Time', fontsize=12, weight='bold')
+        ax.set_title('Cumulative Balance Over Time (Filtered)', fontsize=12, weight='bold')
         ax.set_xlabel('Date', fontsize=10)
         ax.set_ylabel('Balance ($)', fontsize=10)
         ax.grid(True, linestyle='--', alpha=0.6)
         
-        # Rotate and format x-axis dates
         fig.autofmt_xdate(rotation=45)
         
-        # Display the current total balance
         final_balance = df['running_balance'].iloc[-1]
         balance_color = '#006600' if final_balance >= 0 else '#cc0000'
-        ax.axhline(0, color='gray', linestyle='--') # Zero line
+        ax.axhline(0, color='gray', linestyle='--')
 
-        # Add canvas to the chart frame
         canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         canvas_widget = canvas.get_tk_widget()
         canvas_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
         canvas.draw()
         
-        # Display the total balance clearly above the chart
         ttk.Label(self.chart_frame, 
-                  text=f"Total Balance: ${final_balance:,.2f}", 
+                  text=f"End Balance: ${final_balance:,.2f}", 
                   font=('Inter', 12, 'bold'), 
                   foreground=balance_color).pack(side=tk.TOP, anchor='w', padx=10)
 
 
     def plot_category_summary(self, df):
         """Generates a bar chart summary of Income and Expense by category."""
-        # Calculate totals
         income_summary = df[df['type'] == 'Income'].groupby('category')['amount'].sum().sort_values(ascending=False)
         expense_summary = df[df['type'] == 'Expense'].groupby('category')['amount'].sum().sort_values(ascending=False)
         
-        # Combine top categories for visualization
         top_n = 5
         plot_data = pd.concat([
             income_summary.head(top_n).rename('Income'),
             expense_summary.head(top_n).rename('Expense')
         ], axis=1).fillna(0)
 
-        # Matplotlib Figure setup
         fig = Figure(figsize=(5, 3.5), dpi=100)
         ax = fig.add_subplot(111)
         
-        # Plotting the data
         categories = plot_data.index
         x = np.arange(len(categories))
         width = 0.35
@@ -395,12 +532,12 @@ class FinanceApp(tk.Tk):
         rects2 = ax.bar(x + width/2, plot_data['Expense'], width, label='Expense', color='#FF6347')
 
         # Styling
-        ax.set_title(f'Top {top_n} Category Summary', fontsize=12, weight='bold')
+        ax.set_title(f'Top {top_n} Category Summary (Filtered)', fontsize=12, weight='bold')
         ax.set_ylabel('Total Amount ($)', fontsize=10)
         ax.set_xticks(x)
         ax.set_xticklabels(categories, rotation=45, ha='right')
         ax.legend()
-        fig.tight_layout(pad=1.5) # Adjust layout to prevent labels from overlapping
+        fig.tight_layout(pad=1.5)
 
         # Add canvas to the chart frame
         canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
