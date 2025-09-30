@@ -1,0 +1,61 @@
+💰 Professional Personal Finance Manager
+This is a professional desktop application built using Python, SQLite, and the Tkinter framework, designed for managing personal finances, tracking income and expenses, and visualizing financial health over time.
+
+The application is specifically optimized for a seamless experience on macOS (Mac mini, MacBook, etc.).
+
+✨ Features
+GUI Interface (Tkinter): A clean, modern, and responsive graphical user interface for easy input and navigation.
+
+Persistent Data Storage (SQLite): All transaction data is securely stored locally in a finance_data.db file, ensuring data persists between sessions.
+
+Real-Time Visualization (Matplotlib/Pandas):
+
+Cumulative Balance Chart: Track your running balance trend over time.
+
+Category Summary: Bar charts showing a breakdown of top income and expense categories.
+
+Transaction Management: Easily add new transactions (Income or Expense), select categories, and delete existing records.
+
+macOS Integration: Includes minor tweaks to ensure proper application naming in the macOS menu bar.
+
+🚀 Getting Started
+Prerequisites
+To run this application, you need Python 3 installed on your system, along with the following libraries.
+
+Python 3 (3.7+ recommended)
+
+Tkinter (Usually included with standard Python installations)
+
+SQLite3 (Usually included with standard Python installations)
+
+Pandas
+
+Matplotlib
+
+Installation (Dependencies)
+Install the required Python libraries using pip:
+
+pip install pandas matplotlib
+
+Running the Application
+Save the provided Python file as finance_manager.py.
+
+Run the script directly from your Terminal:
+
+python3 finance_manager.py
+
+💻 Building a Standalone macOS App
+To convert the Python script into a self-contained, double-clickable application bundle (.app) for macOS, you can use PyInstaller. This removes the need to run the script via the Terminal every time.
+
+1. Install PyInstaller
+pip install pyinstaller
+
+2. Build the App
+Run the following command in your terminal from the directory containing finance_manager.py:
+
+pyinstaller --onefile --windowed --name "Finance Manager" finance_manager.py
+
+3. Locate the Application
+A new directory named dist will be created. Inside it, you will find the standalone application bundle: Finance Manager.app.
+
+You can move this file to your macOS Applications folder and launch it just like any other native application.
